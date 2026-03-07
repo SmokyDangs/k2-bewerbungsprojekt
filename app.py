@@ -6,7 +6,7 @@ from PIL import Image, ImageOps
 import io
 import pandas as pd
 
-# Optionaler Import mit Fallback-Logik für den Slider-Vergleich
+# Optionaler Import für Slider-Vergleich
 try:
     from streamlit_image_comparison import image_comparison
     HAS_COMPARISON = True
@@ -20,12 +20,44 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS für optimiertes Layout
+# --- VERBESSERTES CSS ---
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background-color: white; border-left: 5px solid #007bff; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    [data-testid="stVerticalBlock"] > div:has(div.stMetric) { margin-bottom: 10px; }
+    /* Hintergrund und Font */
+    .main { background-color: #f0f2f6; }
+    
+    /* Metric Cards Styling */
+    div[data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; color: #1f77b4; }
+    .stMetric {
+        background-color: white;
+        border-radius: 12px;
+        padding: 20px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        border-top: 4px solid #1f77b4;
+    }
+    
+    /* Buttons Styling */
+    .stDownloadButton > button {
+        width: 100%;
+        border-radius: 8px;
+        background-color: #1f77b4;
+        color: white;
+        border: none;
+        transition: all 0.3s ease;
+        font-weight: 600;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #155a8a;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    
+    /* Sidebar Styling */
+    .css-1d391kg { background-color: #1e2630; }
+    .sidebar-text { color: white; font-weight: 500; }
+    
+    /* Header Styling */
+    h1 { color: #1e2630; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -43,58 +75,61 @@ def main():
     st.caption("Präzisions-Segmentation für infrastrukturelle Schadensanalyse")
     st.markdown("---")
 
-    # Sidebar (Kompakt gehalten)
-    st.sidebar.header("⚙️ Konfiguration")
+    # Sidebar
+    st.sidebar.header("⚙️ Analyse-Setup")
     conf_threshold = st.sidebar.slider("KI-Sensitivität", 0.0, 1.0, 0.25, 0.05)
     use_autocontrast = st.sidebar.checkbox("Bild-Optimierung (Auto-Kontrast)", value=True)
     
+    # Modell-Status in Sidebar
     try:
         model = load_model()
-        st.sidebar.success("✅ Modell aktiv")
+        st.sidebar.success("✅ Modell: YOLO-Segmentierung aktiv")
     except Exception:
-        st.sidebar.error("❌ 'best.pt' fehlt")
+        st.sidebar.error("❌ 'best.pt' nicht im Ordner!")
         st.stop()
 
     uploaded_file = st.file_uploader("Bild zur Analyse hochladen...", type=["jpg", "png", "webp"])
 
     if uploaded_file:
-        # Bildverarbeitung
         raw_image = Image.open(uploaded_file).convert("RGB")
         processed_image = optimize_image(raw_image) if use_autocontrast else raw_image
         img_array = np.array(processed_image)
 
-        with st.spinner('Analysiere Oberflächenstruktur...'):
+        with st.spinner('KI berechnet Schadenssegmente...'):
             results = model.predict(source=img_array, conf=conf_threshold)
             result = results[0]
 
         # --- HAUPTFENSTER LAYOUT ---
-        # Spalte 1: Bildvergleich | Spalte 2: Auswertung & Export
-        col_main_left, col_main_right = st.columns([3, 2], gap="large")
+        col_left, col_right = st.columns([3, 2], gap="large")
 
-        with col_main_left:
-            st.subheader("🔍 Visueller Vergleich")
-            
-            # Plotten (feste Transparenz von 0.5 für optimale Sichtbarkeit)
-            try:
-                res_plotted = result.plot(conf=True, labels=True, mask_alpha=0.5)
-            except TypeError:
-                res_plotted = result.plot()
-            
-            res_rgb = cv2.cvtColor(res_plotted, cv2.COLOR_BGR2RGB)
-            
+        # 1. Bild-Verarbeitung (Zentral für beide Spalten)
+        try:
+            # Hier stellen wir sicher, dass die Masken für den Export gerendert werden
+            # mask_alpha=0.5 sorgt für Transparenz im Export-Bild
+            res_plotted_bgr = result.plot(conf=True, labels=True, mask_alpha=0.5)
+            res_rgb = cv2.cvtColor(res_plotted_bgr, cv2.COLOR_BGR2RGB)
+            res_pil = Image.fromarray(res_rgb)
+        except Exception:
+            # Fallback falls Plotting-Parameter Probleme machen
+            res_plotted_bgr = result.plot()
+            res_rgb = cv2.cvtColor(res_plotted_bgr, cv2.COLOR_BGR2RGB)
+            res_pil = Image.fromarray(res_rgb)
+
+        with col_left:
+            st.subheader("🔍 Analyse-Visualisierung")
             if HAS_COMPARISON:
                 image_comparison(
                     img1=raw_image,
-                    img2=Image.fromarray(res_rgb),
+                    img2=res_pil,
                     label1="Original",
-                    label2="KI-Analyse",
+                    label2="KI-Segmentation",
                     starting_position=50
                 )
             else:
-                st.image(res_rgb, caption="KI-Ergebnis (Segmentation)", use_container_width=True)
+                st.image(res_pil, caption="KI-Ergebnis inklusive Masken", use_container_width=True)
 
-        with col_main_right:
-            st.subheader("📊 Auswertung")
+        with col_right:
+            st.subheader("📊 Metriken & Bericht")
             
             if result.masks is not None:
                 num_cracks = len(result.masks)
@@ -102,44 +137,44 @@ def main():
                 crack_pixels = sum([m.data.sum().item() for m in result.masks])
                 percentage = (crack_pixels / total_pixels) * 100
 
-                # Metriken untereinander
-                st.metric("Detektierte Risse", f"{num_cracks} Segmente")
+                # Anzeige der Karten
+                st.metric("Detektierte Risse", f"{num_cracks}")
                 st.metric("Schadensfläche", f"{percentage:.4f} %")
                 
-                status_color = "🔴 Kritisch" if percentage > 0.5 else "🟢 Tolerierbar"
-                st.metric("Statusbewertung", status_color)
+                status = "🚨 KRITISCH" if percentage > 0.5 else "✅ STABIL"
+                st.metric("Zustandsbewertung", status)
 
                 st.markdown("---")
-                st.subheader("📂 Export & Protokoll")
+                st.subheader("📂 Ergebnis-Sicherung")
                 
-                # CSV Daten vorbereiten
+                # Daten-Tabelle
                 df = pd.DataFrame({
-                    "Parameter": ["Datei", "Segmente", "Pixel Gesamt", "Riss-Pixel", "Fläche %"],
-                    "Wert": [uploaded_file.name, num_cracks, total_pixels, int(crack_pixels), f"{percentage:.5f}"]
+                    "Metrik": ["Datei", "Anzahl Risse", "Fläche %", "Pixel-Anzahl"],
+                    "Wert": [uploaded_file.name, num_cracks, f"{percentage:.5f}", int(crack_pixels)]
                 })
 
-                c_down1, c_down2 = st.columns(2)
-                with c_down1:
+                # Export Bereich
+                c1, c2 = st.columns(2)
+                with c1:
                     csv = df.to_csv(index=False).encode('utf-8')
-                    st.download_button("📊 CSV Export", csv, "messprotokoll.csv", "text/csv", use_container_width=True)
+                    st.download_button("📊 Daten (CSV)", csv, f"crack_data_{uploaded_file.name}.csv", "text/csv")
                 
-                with c_down2:
+                with c2:
+                    # Der Export enthält nun die 'res_pil', welche die Masken eingezeichnet hat
                     img_byte_arr = io.BytesIO()
-                    Image.fromarray(res_rgb).save(img_byte_arr, format='PNG')
-                    st.download_button("🖼️ Bild Export", img_byte_arr.getvalue(), "analyse.png", "image/png", use_container_width=True)
+                    res_pil.save(img_byte_arr, format='PNG')
+                    st.download_button("🖼️ Bild + Masken", img_byte_arr.getvalue(), f"crack_mask_{uploaded_file.name}.png", "image/png")
                 
-                # JSON Log ganz unten in der rechten Spalte
-                with st.expander("🛠️ Technisches Log (JSON)"):
+                with st.expander("📝 Technisches JSON-Protokoll"):
                     try:
                         st.json(result.to_json())
                     except:
-                        st.write("JSON-Daten nicht verfügbar.")
+                        st.write("JSON-Export nicht unterstützt.")
             else:
-                st.success("✅ Keine strukturellen Risse gefunden.")
+                st.success("Keine Risse detektiert. Die Struktur scheint intakt.")
                 st.balloons()
-
     else:
-        st.info("Bitte laden Sie ein Foto hoch, um die Analyse zu starten.")
+        st.info("Bereit für Analyse. Bitte laden Sie ein Bild hoch.")
 
 if __name__ == "__main__":
     main()
