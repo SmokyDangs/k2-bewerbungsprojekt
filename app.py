@@ -77,7 +77,7 @@ def main():
 
     # Sidebar
     st.sidebar.header("⚙️ Analyse-Setup")
-    conf_threshold = st.sidebar.slider("KI-Sensitivität", 0.0, 1.0, 0.25, 0.05)
+    conf_threshold = st.sidebar.slider("KI-Sensitivität", 0.0, 1.0, 0.15, 0.05)
     use_autocontrast = st.sidebar.checkbox("Bild-Optimierung (Auto-Kontrast)", value=True)
     
     # Modell-Status in Sidebar
