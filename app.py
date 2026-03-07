@@ -5,7 +5,13 @@ from ultralytics import YOLO
 from PIL import Image, ImageOps
 import io
 import pandas as pd
-from streamlit_image_comparison import image_comparison # Optional: pip install streamlit-image-comparison
+
+# Optionaler Import mit Fallback-Logik
+try:
+    from streamlit_image_comparison import image_comparison
+    HAS_COMPARISON = True
+except ImportError:
+    HAS_COMPARISON = False
 
 # --- SEITEN KONFIGURATION ---
 st.set_page_config(
@@ -18,19 +24,19 @@ st.set_page_config(
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stMetric { background-color: white; border-left: 5px solid #007bff; }
-    .reportview-container .main .block-container { padding-top: 2rem; }
+    .stMetric { background-color: white; border-left: 5px solid #007bff; padding: 15px; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
 @st.cache_resource
 def load_model():
+    # Lädt das trainierte Modell
     return YOLO("best.pt")
 
 def optimize_image(image):
     # Verbessert Kontrast für bessere KI-Erkennung
-    img_gray = ImageOps.exif_transpose(image)
-    return ImageOps.autocontrast(img_gray, cutoff=0.5)
+    img = ImageOps.exif_transpose(image)
+    return ImageOps.autocontrast(img, cutoff=0.5)
 
 # --- HAUPTPROGRAMM ---
 def main():
@@ -45,18 +51,19 @@ def main():
     st.sidebar.subheader("Bild-Optimierung")
     use_autocontrast = st.sidebar.checkbox("Auto-Kontrast (bei Schatten)", value=True)
     
-    model = load_model()
+    try:
+        model = load_model()
+        st.sidebar.success("✅ Modell geladen")
+    except Exception as e:
+        st.sidebar.error("❌ Modell 'best.pt' fehlt")
+        st.stop()
 
     uploaded_file = st.file_uploader("Bild hochladen...", type=["jpg", "png", "webp"])
 
     if uploaded_file:
         # Bild laden & Vorbereiten
         raw_image = Image.open(uploaded_file).convert("RGB")
-        if use_autocontrast:
-            processed_image = optimize_image(raw_image)
-        else:
-            processed_image = raw_image
-            
+        processed_image = optimize_image(raw_image) if use_autocontrast else raw_image
         img_array = np.array(processed_image)
 
         # Inferenz
@@ -67,65 +74,69 @@ def main():
         # --- VISUALISIERUNG ---
         st.subheader("🔍 Visuelle Analyse")
         
-        # Plotten des Ergebnisses
+        # Plotten des Ergebnisses mit Fehlerbehandlung für den Parameter-Namen
         try:
             res_plotted = result.plot(conf=True, labels=True, mask_alpha=mask_opacity)
-        except:
+        except TypeError:
             res_plotted = result.plot()
         
         res_rgb = cv2.cvtColor(res_plotted, cv2.COLOR_BGR2RGB)
         
-        # Interaktiver Vergleich
-        image_comparison(
-            img1=raw_image,
-            img2=Image.fromarray(res_rgb),
-            label1="Original",
-            label2="KI-Analyse",
-            starting_position=50
-        )
+        # Interaktiver Vergleich (nur wenn Modul installiert, sonst Side-by-Side)
+        if HAS_COMPARISON:
+            image_comparison(
+                img1=raw_image,
+                img2=Image.fromarray(res_rgb),
+                label1="Original",
+                label2="KI-Analyse",
+                starting_position=50
+            )
+        else:
+            col_img1, col_img2 = st.columns(2)
+            col_img1.image(raw_image, caption="Original", use_container_width=True)
+            col_img2.image(res_rgb, caption="KI-Analyse", use_container_width=True)
 
         # --- DATEN & EXPORT ---
         st.markdown("---")
         col_stats, col_export = st.columns([2, 1])
 
-        with col_stats:
-            st.subheader("📊 Messdaten")
-            if result.masks is not None:
-                num_cracks = len(result.masks)
-                total_pixels = img_array.shape[0] * img_array.shape[1]
-                crack_pixels = sum([m.data.sum().item() for m in result.masks])
-                percentage = (crack_pixels / total_pixels) * 100
+        if result.masks is not None:
+            num_cracks = len(result.masks)
+            total_pixels = img_array.shape[0] * img_array.shape[1]
+            crack_pixels = sum([m.data.sum().item() for m in result.masks])
+            percentage = (crack_pixels / total_pixels) * 100
 
+            with col_stats:
+                st.subheader("📊 Messdaten")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Anzahl Risse", num_cracks)
                 m2.metric("Schadensfläche", f"{percentage:.4f} %")
-                m3.metric("Gefahrenstufe", "HOCH" if percentage > 1.0 else "GERING")
+                m3.metric("Gefahrenstufe", "HOCH" if percentage > 0.5 else "GERING")
 
-                # Daten-Tabelle für Export
                 report_data = {
                     "Parameter": ["Dateiname", "Anzahl Segmente", "Pixel Gesamt", "Riss-Pixel", "Flächenanteil %"],
                     "Wert": [uploaded_file.name, num_cracks, total_pixels, int(crack_pixels), f"{percentage:.5f}"]
                 }
                 df = pd.DataFrame(report_data)
-            else:
-                st.success("Keine Risse gefunden!")
-                df = None
 
-        with col_export:
-            st.subheader("📂 Export")
-            if df is not None:
-                # CSV Export
+            with col_export:
+                st.subheader("📂 Export")
                 csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📊 CSV Messprotokoll", csv, "messdaten.csv", "text/csv")
+                st.download_button("📊 CSV Protokoll", csv, "messdaten.csv", "text/csv")
                 
-                # Bild Export
                 img_byte_arr = io.BytesIO()
                 Image.fromarray(res_rgb).save(img_byte_arr, format='PNG')
-                st.download_button("🖼️ Analyse-Bild (PNG)", img_byte_arr.getvalue(), "analyse.png", "image/png")
+                st.download_button("🖼️ Bild speichern", img_byte_arr.getvalue(), "analyse.png", "image/png")
+        else:
+            st.success("Keine Risse gefunden!")
 
-        # --- EXPERTEN-LOG ---
+        # --- EXPERTEN-LOG (KORRIGIERT) ---
         with st.expander("📝 Technisches Protokoll (Raw Data)"):
-            st.json(result.tojson())
+            # FIX: .to_json() statt .tojson()
+            try:
+                st.json(result.to_json())
+            except Exception as e:
+                st.warning("JSON-Export für dieses Modell-Ergebnis nicht verfügbar.")
 
 if __name__ == "__main__":
     main()
