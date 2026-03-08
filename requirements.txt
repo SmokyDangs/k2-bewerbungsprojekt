@@ -1,5 +1,7 @@
+streamlit==1.55.0
+ultralytics==8.4.21
 opencv-python-headless
-ultralytics
-streamlit
 pandas
-Pillow
+pillow
+numpy
+streamlit-image-comparison
