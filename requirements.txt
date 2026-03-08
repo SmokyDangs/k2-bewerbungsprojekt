@@ -4,3 +4,4 @@ opencv-python-headless
 pillow
 numpy
 streamlit-image-comparison
+opencv-python
