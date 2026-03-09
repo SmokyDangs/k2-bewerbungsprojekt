@@ -17,8 +17,8 @@ def load_model(model_path):
         return None
 
 def main():
-    st.title("🚀 YOLO12 Objekt-Erkennung")
-    st.write("Lade ein Bild hoch, um Objekte mit dem neuesten YOLO12 Modell zu erkennen.")
+    st.title("Riss Erkennung")
+    st.write("Lade ein Bild hoch, um Risse erkennen zu lassen in z.b Wänden oder Werkstücken.")
 
     # Sidebar für Einstellungen
     st.sidebar.header("Konfiguration")
